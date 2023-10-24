@@ -19,8 +19,8 @@
 #define TX_LED 5        // LED para mostrar estado de emisión
 #define RX_LED 4        // LED para mostrar estado de recepción
 
-const String line = "-";
-const String dot = "*";
+const String LINE = "-";
+const String DOT = "*";
 const int T = 200;              // Parametro de tiempo que determina tiempo de punto, raya y espacios
 
 String morse_character = "";    // String que guarda los Puntos y Lineas
@@ -61,7 +61,7 @@ void setup() {
   lcd.setCursor(0, 0);
   lcd.print("TRADUCTOR");
   lcd.setCursor(0, 1);
-  lcd.print("MORSE <Ver_0.1>");
+  lcd.print("MORSE <Ver_0.2>");
   delay(500);
   lcd.clear();
 
@@ -78,9 +78,12 @@ void loop() {
     signal_time++;
     if (signal_time < (3*T))
     {
-      // Punto
-      digitalWrite(DOT_LED, HIGH);
-      digitalWrite(LINE_LED, LOW);
+      if (signal_time >= T) 
+      {
+        // Punto
+        digitalWrite(DOT_LED, HIGH);
+        digitalWrite(LINE_LED, LOW);        
+      }
     } 
     else 
     {
@@ -93,11 +96,11 @@ void loop() {
   {
     if (signal_time >= T && signal_time < (3*T)) 
     {
-      morse_character += dot;    // Concatenar un punto (*)
+      morse_character += DOT;    // Concatenar un punto (*)
     } 
     else if (signal_time >= (3*T))
     {
-      morse_character += line;  // Concatenar una línea (-)
+      morse_character += LINE;  // Concatenar una línea (-)
     }
     signal_time = 0;  // Reiniciar el conteo de tiempo de pulsado
     digitalWrite(DOT_LED, LOW);
@@ -107,13 +110,14 @@ void loop() {
     Serial.print(morse_character);
     lcd.setCursor(0, 1);
     lcd.print(morse_character);
+    pause_time = 0;
+    char_check = true;
+    word_check = true;
   } 
   else if (button_state && !last_button_state)  // Si se presionó el pulsador pero antes no estaba pulsado...
   {
     // Se volvió a presionar el pulsador de morse, así que se vuelve a habilitar la posibilidad de un espacio
-    pause_time = 0;
-    char_check = true;
-    word_check = true;
+
   }
   else if (!button_state && !last_button_state) // Si el pulsador no está pulsado ni lo estaba...
   {
@@ -122,22 +126,20 @@ void loop() {
     {
       lcd.setCursor(cursor, 0);
       alfanum_character = translate(morse_character);
-      Serial.print(alfanum_character);
-      lcd.print(alfanum_character);
+      Serial.print(" = ");
+      Serial.println(alfanum_character);
       my_word += alfanum_character;
       char_check = false;     // Deshabilitar la repetición de espacios
       morse_character = "";   // Limpiar lo que hay en morse para empezar un nuevo procesamiento
       cursor ++;
       lcd.setCursor(0, 1);
-      lcd.print("                ");
+      lcd.print("                ");        // Esto se encarga de borrar los puntos y lineas de más
     }
     if ((pause_time >= (7*T)) && word_check)
     {
-      Serial.print(" ");
-      lcd.print(" ");
+      Serial.println(" ");
       my_word += " ";
       word_check = false;
-      cursor++;
     }
   }
   
