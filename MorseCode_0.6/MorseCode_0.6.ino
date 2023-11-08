@@ -2,9 +2,6 @@
 Date: 31/10/2023
 */
 
-#include <Wire.h>
-#include <LiquidCrystal_I2C.h>
-
 /* 
   PARAMETROS DEL CODIGO MORSE 
   PUNTO: T
@@ -14,32 +11,28 @@ Date: 31/10/2023
   ESPACIO ENTRE PALABRAS:   7T
 */
 
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
 #define MORSE_BUTTON A0   // Pulsador para código morse
 #define DELETE_BUTTON A1  // Pulsador para borrar último caracter
 #define SEND_BUTTON A2    // Pulsador para enviar mensaje
 #define DOT_LED 8       // LED para mostrar punto durante la codificación en morse
 #define LINE_LED 6      // LED para mostrar linea durante la codificación en morse
-#define TX_LED 5        // LED para mostrar estado de emisión
-#define RX_LED 4        // LED para mostrar estado de recepción
 
 const String LINE = "-";
 const String DOT = "*";
 const int T = 300;              // Parametro de tiempo que determina tiempo de punto, raya y espacios
-const int REFRESH_TIME = 1;
 
-String morse_character = "";    // String que guarda los Puntos y Lineas
-String alfanum_character = "";  // String para guardar la traducción del código morse
-String my_word = "";            // String que almacena las letras
+boolean char_check = false;     // Se encarga de comprobar si se dejó de escribir la Letra, para luego traducirla
+boolean word_check = false;     // Se encarga de comprobar si se debe realizar un salto de linea
 int button_state = LOW;         // Estado actual del boton
 int last_button_state = LOW;    // Estado anterior del boton
 long signal_time = 0;           // Contador de duración de la señal (pulsador presionado)
 long pause_time = 0;            // Contador de duración de espacio (pulsador sin presionar)
-boolean char_check = false;     // Se encarga de comprobar si se dejó de escribir la Letra, para luego traducirla
-boolean word_check = false;     // Se encarga de comprobar si se debe realizar un salto de linea
-boolean transmitting_flag = false;
-
-int cursor = 0;         // Variable para el LCD, para el borrado y la Impresion de las letras
-
+String morse_character = "";    // String que guarda los Puntos y Lineas
+String alfanum_character = "";  // String para guardar la traducción del código morse
+String my_word = "";            // String que almacena las letras
 
 String translate(String);
 LiquidCrystal_I2C lcd(0x27, 16, 2);  // Incializacion LCD I2C
@@ -55,12 +48,9 @@ void setup()
   pinMode(SEND_BUTTON, INPUT);
   pinMode(DOT_LED, OUTPUT);
   pinMode(LINE_LED, OUTPUT);
-  pinMode(TX_LED, OUTPUT);
-  pinMode(RX_LED, OUTPUT);
 
-  digitalWrite(DOT_LED, LOW);
-  digitalWrite(LINE_LED, LOW);
-  digitalWrite(7, HIGH);
+  digitalWrite(DOT_LED, HIGH);
+  digitalWrite(LINE_LED, HIGH);
 
   Serial.println("\nBienvenido a la Prueba de traductor de Codigo Morse");
   Serial.println("Usa el boton para enviar un punto o una linea, despues será traducido y se mostrará en el monitor en serie");
@@ -70,7 +60,7 @@ void setup()
   lcd.setCursor(0, 0);
   lcd.print("TRADUCTOR  STM");
   lcd.setCursor(0, 1);
-  lcd.print("MORSE <Ver 0.4>");
+  lcd.print("MORSE <Ver 0.6>");
   delay(1500);
   lcd.clear();
 
@@ -159,11 +149,11 @@ void loop() {
     {
       my_word += " ";
       word_check = false;
-      Serial.println("Espacio ");
+      Serial.print("Espacio: ");
+      Serial.print(my_word);
+      Serial.println(".");
       lcd.clear();
       lcd.setCursor(0, 0);
-      Serial.print(my_word);
-      Serial.print('\n');
       lcd.print(my_word);
       lcd.blink();
 
@@ -193,10 +183,10 @@ void loop() {
       {
       digitalWrite(LINE_LED, HIGH);
       digitalWrite(DOT_LED, LOW);
-      delay(200);
+      delay(100);
       digitalWrite(LINE_LED, LOW);
       digitalWrite(DOT_LED, HIGH);
-      delay(200);
+      delay(100);
       }
       digitalWrite(LINE_LED, HIGH);
       digitalWrite(DOT_LED, HIGH);
@@ -210,7 +200,6 @@ void loop() {
     delay(200);
     if (digitalRead(SEND_BUTTON) == HIGH)
     {
-      transmitting_flag = false;
       if (my_word == "") 
       {
         lcd.print("   NO MESSAGE");
@@ -235,7 +224,7 @@ void loop() {
   }
 
   last_button_state = button_state;
-  delay(REFRESH_TIME);
+  delay(1);
 }
 
 
