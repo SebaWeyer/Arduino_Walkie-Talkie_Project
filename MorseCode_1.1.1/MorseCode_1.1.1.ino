@@ -1,5 +1,5 @@
 /*
-Date: 31/10/2023
+Date: 08/11/2023
 */
 
 /* 
@@ -28,18 +28,21 @@ const uint8_t address[][6] = {"1Node", "2Node"};
 const String LINE = "-";
 const String DOT = "*";
 const int T = 300;              // Parametro de tiempo que determina tiempo de punto, raya y espacios
-const bool radioNumber = 1;     // 0 uses address[0] to transmit, 1 uses address[1] to transmit
+const bool radioNumber = 0;     // 0 uses address[0] to transmit, 1 uses address[1] to transmit
 
-bool role = false;              // true = TX role, false = RX role
 bool char_check = false;        // Se encarga de comprobar si se dejó de escribir la Letra, para luego traducirla
 bool word_check = false;        // Se encarga de comprobar si se debe realizar un salto de linea
-int button_state = LOW;         // Estado actual del boton
-int last_button_state = LOW;    // Estado anterior del boton
-long signal_time = 0;           // Contador de duración de la señal (pulsador presionado)
-long pause_time = 0;            // Contador de duración de espacio (pulsador sin presionar)
+bool tx_report = false;
+bool button_state = LOW;         // Estado actual del boton
+bool last_button_state = LOW;    // Estado anterior del boton
+unsigned long start_timer = 0;
+unsigned long end_timer = 0;
+unsigned long signal_time = 0;           // Contador de duración de la señal (pulsador presionado)
+unsigned long pause_time = 0;            // Contador de duración de espacio (pulsador sin presionar)
 String morse_character = "";    // String que guarda los Puntos y Lineas
 String alfanum_character = "";  // String para guardar la traducción del código morse
 String my_word = "";            // String que almacena las letras
+String rx_word = "";            // String que almacena la palabra recibida del otro dispositivo
 
 String translate(String);
 RF24 radio(CE_PIN, CSN_PIN);
@@ -53,19 +56,12 @@ void setup()
 
   while (!radio.begin())
   {
+    delay(20);
     Serial.println("Radio hardware no responde");
   }
   radio.setPALevel(RF24_PA_LOW);  // RF24_PA_MAX por defecto
   radio.openWritingPipe(address[radioNumber]);  // Abrir canal de escritura 
   radio.openReadingPipe(1, address[!radioNumber]);  // Abrir canal de lectura
-  if (role) 
-  {
-    radio.stopListening();  // put radio in TX mode
-  } 
-  else 
-  {
-    radio.startListening();  // put radio in RX mode
-  }
 
   pinMode(MORSE_BUTTON, INPUT);
   pinMode(DELETE_BUTTON, INPUT);
@@ -84,7 +80,7 @@ void setup()
   lcd.setCursor(0, 0);
   lcd.print("TRADUCTOR  STM");
   lcd.setCursor(0, 1);
-  lcd.print("MORSE <Ver 0.6>");
+  lcd.print("MORSE <Ver 1.1.0>");
   delay(1500);
   lcd.clear();
 
@@ -93,161 +89,215 @@ void setup()
 
 void loop() {
 
-  button_state = digitalRead(MORSE_BUTTON);
-
-  if (button_state && last_button_state)  // Si el pulsador estaba pulsado y sigue pulsado...
+  while (rx_word == "") 
   {
-    signal_time++;
-    if (signal_time < (3*T))
+    // void loop de MorseCode_0.6
+    button_state = digitalRead(MORSE_BUTTON);
+
+    if (button_state && last_button_state)  // Si el pulsador estaba pulsado y sigue pulsado...
     {
-      if (signal_time >= T) 
+      signal_time++;
+      if (signal_time < (3*T))
       {
-        // Punto
-        digitalWrite(DOT_LED, LOW);
-        digitalWrite(LINE_LED, HIGH);        
+        if (signal_time >= T) 
+        {
+          // Punto
+          digitalWrite(DOT_LED, LOW);
+          digitalWrite(LINE_LED, HIGH);        
+        }
+      } 
+      else 
+      {
+        // Linea
+        digitalWrite(DOT_LED, HIGH);
+        digitalWrite(LINE_LED, LOW);
       }
     } 
-    else 
+    else if (!button_state && last_button_state)  // Si se soltó el pulsador pero antes estaba pulsado...
     {
-      // Linea
+      if (signal_time >= T && signal_time < (3*T)) 
+      {
+        morse_character += DOT;    // Concatenar un punto (*)
+        Serial.print(DOT);
+      } 
+      else if (signal_time >= (3*T))
+      {
+        morse_character += LINE;  // Concatenar una línea (-)
+        Serial.print(LINE);
+      }
+      signal_time = 0;  // Reiniciar el conteo de tiempo de pulsado
       digitalWrite(DOT_LED, HIGH);
-      digitalWrite(LINE_LED, LOW);
-    }
-  } 
-  else if (!button_state && last_button_state)  // Si se soltó el pulsador pero antes estaba pulsado...
-  {
-    if (signal_time >= T && signal_time < (3*T)) 
-    {
-      morse_character += DOT;    // Concatenar un punto (*)
-      Serial.print(DOT);
+      digitalWrite(LINE_LED, HIGH);
+
+      // Esta parte envia los Puntos y Lineas al serialMonitor y al LCD
+      lcd.setCursor(0, 1);
+      lcd.print(morse_character);
+      pause_time = 0;
+      char_check = true;
+      word_check = true;
     } 
-    else if (signal_time >= (3*T))
+    else if (button_state && !last_button_state)  // Si se presionó el pulsador pero antes no estaba pulsado...
     {
-      morse_character += LINE;  // Concatenar una línea (-)
-      Serial.print(LINE);
-    }
-    signal_time = 0;  // Reiniciar el conteo de tiempo de pulsado
-    digitalWrite(DOT_LED, HIGH);
-    digitalWrite(LINE_LED, HIGH);
-
-    // Esta parte envia los Puntos y Lineas al serialMonitor y al LCD
-    lcd.setCursor(0, 1);
-    lcd.print(morse_character);
-    pause_time = 0;
-    char_check = true;
-    word_check = true;
-  } 
-  else if (button_state && !last_button_state)  // Si se presionó el pulsador pero antes no estaba pulsado...
-  {
-    lcd.noBlink();
-    // Se volvió a presionar el pulsador de morse, así que se vuelve a habilitar la posibilidad de un espacio
-
-  }
-  else if (!button_state && !last_button_state) // Si el pulsador no está pulsado ni lo estaba...
-  {
-    pause_time ++;
-    if ((pause_time >= (3*T)) && char_check)
-    {
-      alfanum_character = translate(morse_character);
-      my_word += alfanum_character;
-
-      Serial.print(" = ");
-      Serial.println(alfanum_character);
-      lcd.clear();
       lcd.noBlink();
-      lcd.setCursor(0, 0);
-      if (my_word.length() >= 15) 
-      {
-        lcd.print(my_word.substring(my_word.length() - 15));
-      } 
-      else 
-      {
-        lcd.print(my_word); 
-      }
-      lcd.blink();
-      char_check = false;     // Deshabilitar la repetición de espacios
-      morse_character = "";   // Limpiar lo que hay en morse para empezar un nuevo procesamiento
-    }
-    if ((pause_time >= (7*T)) && word_check)
-    {
-      my_word += " ";
-      word_check = false;
-      Serial.print("Espacio: ");
-      Serial.print(my_word);
-      Serial.println(".");
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print(my_word);
-      lcd.blink();
+      // Se volvió a presionar el pulsador de morse, así que se vuelve a habilitar la posibilidad de un espacio
 
     }
-  }
-  
-  // Acción del Boton de Borrado
-  if (digitalRead(DELETE_BUTTON) == HIGH) 
-  {  
-    if (my_word.length() > 0) 
+    else if (!button_state && !last_button_state) // Si el pulsador no está pulsado ni lo estaba...
     {
-      my_word.remove((my_word.length()-1), 1);
-      Serial.print("Borrando: ");
-      Serial.println(my_word);
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      if (my_word.length() >= 15) 
+      pause_time ++;
+      if ((pause_time >= (3*T)) && char_check)
       {
-        lcd.print(my_word.substring(my_word.length() - 15));
-      } 
-      else 
-      {
-        lcd.print(my_word); 
-      }
-      lcd.blink();
-      for(int i = 0; i < 2; i++)
-      {
-      digitalWrite(LINE_LED, HIGH);
-      digitalWrite(DOT_LED, LOW);
-      delay(100);
-      digitalWrite(LINE_LED, LOW);
-      digitalWrite(DOT_LED, HIGH);
-      delay(100);
-      }
-      digitalWrite(LINE_LED, HIGH);
-      digitalWrite(DOT_LED, HIGH);
-      delay(200);
-    }
-  }
+        alfanum_character = translate(morse_character);
+        my_word += alfanum_character;
 
-  // Acción del Botón de Envío
-  if (digitalRead(SEND_BUTTON) == HIGH) 
-  {
-    delay(200);
-    if (digitalRead(SEND_BUTTON) == HIGH)
-    {
-      if (my_word == "") 
-      {
-        lcd.print("   NO MESSAGE");
-        delay(1000);
+        Serial.print(" = ");
+        Serial.println(alfanum_character);
         lcd.clear();
-      } 
-      else 
+        lcd.noBlink();
+        lcd.setCursor(0, 0);
+        if (my_word.length() >= 15) 
+        {
+          lcd.print(my_word.substring(15));
+        } 
+        else 
+        {
+          lcd.print(my_word); 
+        }
+        lcd.blink();
+        char_check = false;     // Deshabilitar la repetición de espacios
+        morse_character = "";   // Limpiar lo que hay en morse para empezar un nuevo procesamiento
+      }
+      if ((pause_time >= (7*T)) && word_check)
       {
+        my_word += " ";
+        word_check = false;
+        Serial.print("Espacio: ");
+        Serial.print(my_word);
+        Serial.println(".");
         lcd.clear();
         lcd.setCursor(0, 0);
         lcd.print(my_word);
-        lcd.setCursor(0, 1);
-        lcd.print("     Enviando...");
-        delay(800);
-        lcd.setCursor(0, 1);
-        lcd.print("        Enviado!");
-        delay(800);
-        lcd.clear();
-        my_word = "";
-      }      
+        lcd.blink();
+
+      }
     }
+    
+    // Acción del Boton de Borrado
+    if (digitalRead(DELETE_BUTTON) == HIGH) 
+    {  
+      if (my_word.length() > 0) 
+      {
+        my_word.remove((my_word.length()-1), 1);
+        Serial.print("Borrando: ");
+        Serial.println(my_word);
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        if (my_word.length() >= 15) 
+        {
+          lcd.print(my_word.substring(15));
+        } 
+        else 
+        {
+          lcd.print(my_word); 
+        }
+        lcd.blink();
+        for(int i = 0; i < 2; i++)
+        {
+        digitalWrite(LINE_LED, HIGH);
+        digitalWrite(DOT_LED, LOW);
+        delay(100);
+        digitalWrite(LINE_LED, LOW);
+        digitalWrite(DOT_LED, HIGH);
+        delay(100);
+        }
+        digitalWrite(LINE_LED, HIGH);
+        digitalWrite(DOT_LED, HIGH);
+        delay(200);
+      }
+    }
+
+    // Acción del Botón de Envío
+    if (digitalRead(SEND_BUTTON) == HIGH) 
+    {
+      delay(200);
+      if (digitalRead(SEND_BUTTON) == HIGH)
+      {
+        if (my_word == "") 
+        {
+          lcd.print("   NO MESSAGE");
+          delay(1000);
+          lcd.clear();
+        } 
+        else 
+        {
+          my_word += ".";
+          lcd.clear();
+          lcd.setCursor(0, 0);
+          lcd.print(my_word);
+          lcd.setCursor(0, 1);
+          lcd.print("     Enviando...");
+          delay(800);
+          Serial.print("Enviando: ");
+          Serial.println(my_word);
+          radio.stopListening();
+          start_timer = micros();                // start the timer
+          tx_report = radio.write(&my_word, sizeof(my_word));  // transmit & save the report
+          end_timer = micros();                  // end the timer
+          Serial.print("Enviado en ");
+          Serial.print(end_timer - start_timer);
+          Serial.println(" us.");
+          lcd.setCursor(0, 1);
+          lcd.print("        Enviado!");
+          delay(800);
+          lcd.clear();
+          my_word = "";
+        }      
+      }
+    }
+
+    last_button_state = button_state;
+    start_timer = micros();
+    radio.stopListening();
+    radio.write(&my_word, sizeof(my_word));
+    end_timer = micros();
+    Serial.print(my_word);
+    Serial.print(" · (");
+    Serial.print(end_timer - start_timer);
+    Serial.println(" us.) ");
+    if (my_word == "") 
+    {
+      radio.startListening();
+      radio.read(&rx_word, sizeof(rx_word));
+      Serial.print("Recibido: ");
+      Serial.println(rx_word);      
+    }
+    delay(1);
   }
 
-  last_button_state = button_state;
-  delay(1);
+  if ((rx_word.indexOf(".") == -1))
+  {
+    lcd.clear();
+    lcd.print("Mensaje recibido! ");
+    delay(1000);
+    lcd.clear();
+    if (rx_word.length() > 16) 
+    {
+      lcd.print(rx_word.substring(0, 15));
+      delay(2000);
+      lcd.print(rx_word.substring(15));
+      delay(2000);
+    }
+    else 
+    {
+      lcd.print(rx_word);
+      delay(2000);
+    }
+  }
+  else 
+  {
+    lcd.clear();
+    lcd.print("Mensaje entrante...");
+  }
 }
 
 
